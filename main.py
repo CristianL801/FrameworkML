@@ -1,5 +1,4 @@
 import argparse
-from pathlib import Path
 import pandas as pd
 from sklearn.datasets import load_iris
 from sklearn.model_selection import train_test_split
@@ -9,6 +8,7 @@ from core.loader import DataLoader
 from core.preprocessor import AdaptivePreprocessor
 from evaluation.metrics import ModelEvaluator
 from models.supervised.knn_model import KNNModel
+from models.supervised.linear_models import LinearModel
 from models.supervised.tree_models import CARTModel
 from models.unsupervised.kmeans_engine import KMeansEngine
 
@@ -19,6 +19,8 @@ def run_pipeline(file_path: str):
     # 1. Ingesta Inteligente
     loader = DataLoader(file_path)
     df = loader.load_data()
+    if df is None:
+        return
     target_col, task_type = loader.detect_target(df)
 
     # 2. Análisis Exploratorio Automatizado (EDA)
@@ -49,9 +51,11 @@ def run_pipeline(file_path: str):
     models_to_run = {
         "cart": CARTModel(task=task_type, reports_dir="reports"),
         "knn": KNNModel(task=task_type),
+        "ridge": LinearModel(task=task_type),
     }
 
     evaluator = ModelEvaluator(task=task_type, reports_dir="reports")
+    results_summary = {}
 
     for name, model in models_to_run.items():
         print(f"\n--- Entrenando modelo: {name.upper()} ---")
@@ -62,18 +66,20 @@ def run_pipeline(file_path: str):
         model.fit(X_train_clean, y_train)
         y_pred = model.predict(X_test_clean)
 
-        evaluator.evaluate(y_test, y_pred, model_name=name)
+        results_summary[name.upper()] = evaluator.evaluate(y_test, y_pred, model_name=name)
         model.save()
 
         if name == "cart":
             model.plot_feature_importance(prep.feature_names_out)
 
+    print("\n=== Resumen Comparativo de Modelos ===")
+    summary_df = pd.DataFrame(results_summary).T
+    print(summary_df.round(4))
+
 
 def create_demo_csv(path="data_demo_iris.csv"):
-    """Genera un CSV rápido de prueba si no se pasa un archivo."""
     iris = load_iris(as_frame=True)
-    df = iris.frame
-    df.to_csv(path, index=False)
+    iris.frame.to_csv(path, index=False)
     return path
 
 
