@@ -1,0 +1,86 @@
+import argparse
+from pathlib import Path
+import pandas as pd
+from sklearn.datasets import load_iris
+from sklearn.model_selection import train_test_split
+
+from core.eda import EDAnalyzer
+from core.loader import DataLoader
+from core.preprocessor import AdaptivePreprocessor
+from evaluation.metrics import ModelEvaluator
+from models.supervised.knn_model import KNNModel
+from models.supervised.tree_models import CARTModel
+from models.unsupervised.kmeans_engine import KMeansEngine
+
+
+def run_pipeline(file_path: str):
+    print(f"\n=== Iniciando Framework ML sobre: {file_path} ===")
+
+    # 1. Ingesta Inteligente
+    loader = DataLoader(file_path)
+    df = loader.load_data()
+    target_col, task_type = loader.detect_target(df)
+
+    # 2. Análisis Exploratorio Automatizado (EDA)
+    eda = EDAnalyzer(df, reports_dir="reports")
+    eda.run_full_eda()
+
+    # 3. Enrutamiento: No Supervisado vs Supervisado
+    if target_col is None or task_type == "unsupervised":
+        print("\n>>> Ruta seleccionada: APRENDIZAJE NO SUPERVISADO (K-Means)")
+        prep = AdaptivePreprocessor(model_name="kmeans")
+        X_clean = prep.fit_transform(df)
+
+        engine = KMeansEngine(reports_dir="reports")
+        engine.fit(X_clean)
+        engine.save()
+        return
+
+    # Ruta Supervisada (Clasificación o Regresión)
+    print(f"\n>>> Ruta seleccionada: APRENDIZAJE SUPERVISADO ({task_type.upper()})")
+    X = df.drop(columns=[target_col])
+    y = df[target_col]
+
+    stratify = y if task_type == "classification" else None
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=stratify
+    )
+
+    models_to_run = {
+        "cart": CARTModel(task=task_type, reports_dir="reports"),
+        "knn": KNNModel(task=task_type),
+    }
+
+    evaluator = ModelEvaluator(task=task_type, reports_dir="reports")
+
+    for name, model in models_to_run.items():
+        print(f"\n--- Entrenando modelo: {name.upper()} ---")
+        prep = AdaptivePreprocessor(model_name=name)
+        X_train_clean = prep.fit_transform(X_train)
+        X_test_clean = prep.transform(X_test)
+
+        model.fit(X_train_clean, y_train)
+        y_pred = model.predict(X_test_clean)
+
+        evaluator.evaluate(y_test, y_pred, model_name=name)
+        model.save()
+
+        if name == "cart":
+            model.plot_feature_importance(prep.feature_names_out)
+
+
+def create_demo_csv(path="data_demo_iris.csv"):
+    """Genera un CSV rápido de prueba si no se pasa un archivo."""
+    iris = load_iris(as_frame=True)
+    df = iris.frame
+    df.to_csv(path, index=False)
+    return path
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Framework Modular de Machine Learning")
+    parser.add_argument("--file", type=str, default=None, help="Ruta al dataset (CSV, TSV o Parquet)")
+    args = parser.parse_args()
+
+    dataset_path = args.file if args.file else create_demo_csv()
+    run_pipeline(dataset_path)
