@@ -23,6 +23,9 @@ class DataLoader:
 
         extension = self.filepath.suffix.lower()
 
+        if extension not in (".csv", ".tsv", ".parquet"):
+            raise ValueError(f"Formato no soportado: {extension}. Use CSV, TSV o Parquet.")
+
         try:
             if extension == ".csv":
                 try:
@@ -31,13 +34,13 @@ class DataLoader:
                     self.dataframe = pd.read_csv(self.filepath, encoding="latin-1")
 
             elif extension == ".tsv":
-                self.dataframe = pd.read_csv(self.filepath, sep="\t")
+                try:
+                    self.dataframe = pd.read_csv(self.filepath, sep="\t", encoding="utf-8")
+                except UnicodeDecodeError:
+                    self.dataframe = pd.read_csv(self.filepath, sep="\t", encoding="latin-1")
 
             elif extension == ".parquet":
                 self.dataframe = pd.read_parquet(self.filepath)
-
-            else:
-                raise ValueError(f"Formato no soportado: {extension}. Use CSV, TSV o Parquet.")
 
             print(f"Datos cargados exitosamente: {self.dataframe.shape[0]} filas, {self.dataframe.shape[1]} columnas.")
             return self.dataframe
@@ -46,11 +49,26 @@ class DataLoader:
             print(f"Error al cargar el archivo: {e}")
             return None
 
-    def detect_target(self, df):
+    def detect_target(self, df, target_col=None):
         """
-        Analiza la última columna para inferir automáticamente si la tarea es
-        clasificación, regresión o no supervisada (K-Means).
+        Analiza la columna objetivo (indicada por el usuario o la última por defecto)
+        para inferir si la tarea es clasificación, regresión o no supervisada (K-Means).
         """
+        # Si el usuario especificó el target, validamos que exista
+        if target_col is not None:
+            if target_col not in df.columns:
+                raise ValueError(f"La columna objetivo '{target_col}' no existe en el dataset.")
+            col_data = df[target_col]
+            unique_ratio = col_data.nunique() / len(df)
+
+            if col_data.dtype == "object" or col_data.dtype.name == "category" or unique_ratio < 0.05:
+                print(f"[Loader] Target especificado: '{target_col}' -> Modo: CLASIFICACIÓN")
+                return target_col, "classification"
+
+            print(f"[Loader] Target especificado: '{target_col}' -> Modo: REGRESIÓN")
+            return target_col, "regression"
+
+        # Detección automática sobre la última columna
         last_col = df.columns[-1]
         col_data = df[last_col]
         unique_ratio = col_data.nunique() / len(df)
@@ -61,8 +79,9 @@ class DataLoader:
             return last_col, "classification"
 
         # 2. Si el nombre sugiere objetivo numérico -> Regresión
-        target_hints = ("target", "price", "precio", "label", "class", "y", "sales", "score")
-        if any(hint in last_col.lower() for hint in target_hints):
+        col_lower = last_col.lower().strip()
+        target_hints = ("target", "price", "precio", "label", "class", "sales", "score")
+        if col_lower == "y" or any(hint in col_lower for hint in target_hints):
             print(f"[Loader] Target detectado: '{last_col}' -> Modo: REGRESIÓN")
             return last_col, "regression"
 
