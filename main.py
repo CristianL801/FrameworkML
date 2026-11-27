@@ -9,10 +9,10 @@ from core.loader import DataLoader
 from core.preprocessor import AdaptivePreprocessor
 from evaluation.metrics import ModelEvaluator
 from evaluation.visualizer import ModelVisualizer
-from models.supervised.linear_models import LinearModel
+from models.supervised.linear_models import LinearModel, LassoModel
 from models.supervised.prototype_models import DANNModel, KNNModel, LVQ1Model
 from models.supervised.spline_models import GAMModel, MARSModel
-from models.supervised.tree_models import CARTModel
+from models.supervised.tree_models import CARTModel, RandomForestModel
 from models.unsupervised.kmeans_engine import KMeansEngine
 
 
@@ -64,7 +64,8 @@ def run_pipeline(file_path: str, target_col: str = None, force_unsupervised=Fals
     models_to_run = {
         "cart": CARTModel(task=task_type, reports_dir="reports"),
         "knn": KNNModel(task=task_type),
-        "ridge": LinearModel(task=task_type),
+        "random_forest": RandomForestModel(task=task_type, reports_dir="reports"),
+        "logistic" if task_type == "classification" else "ridge": LinearModel(task=task_type),
         "mars": MARSModel(task=task_type),
         "gam": GAMModel(task=task_type),
     }
@@ -72,6 +73,8 @@ def run_pipeline(file_path: str, target_col: str = None, force_unsupervised=Fals
     if task_type == "classification":
         models_to_run["lvq1"] = LVQ1Model()
         models_to_run["dann"] = DANNModel()
+    else:
+        models_to_run["lasso"] = LassoModel()
 
     evaluator = ModelEvaluator(task=task_type, reports_dir="reports")
     metric_key = "f1_score" if task_type == "classification" else "r2"
@@ -90,8 +93,11 @@ def run_pipeline(file_path: str, target_col: str = None, force_unsupervised=Fals
 
         metrics = evaluator.evaluate(y_test, y_pred, model_name=name)
         results_summary[name.upper()] = metrics
-        model.save()
-        if name == "cart":
+        if name in {"logistic", "ridge"}:
+            model.save(f"reports/{name}_model.joblib")
+        else:
+            model.save()
+        if name in {"cart", "random_forest"}:
             model.plot_feature_importance(prep.feature_names_out)
 
         if metrics[metric_key] > best_score:

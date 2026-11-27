@@ -1,6 +1,6 @@
 from pathlib import Path
 import joblib
-from sklearn.linear_model import LogisticRegression, Ridge
+from sklearn.linear_model import LogisticRegression, Ridge, Lasso
 from sklearn.metrics import accuracy_score, r2_score
 from models.base import BaseModel
 
@@ -45,3 +45,16 @@ class LinearModel(BaseModel):
         path.parent.mkdir(parents=True, exist_ok=True)
         joblib.dump(self.model, path)
         print(f"[LinearModel] Modelo guardado en: '{path}'")
+
+
+class LassoModel(LinearModel):
+    """Regresión lineal con regularización L1."""
+
+    def __init__(self, alpha=0.1, random_state=42):
+        self.task = "regression"
+        self.alpha = alpha
+        self.random_state = random_state
+        self.model = Lasso(alpha=alpha, max_iter=10000)
+
+    def save(self, filepath="reports/lasso_model.joblib"):
+        super().save(filepath)
