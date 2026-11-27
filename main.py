@@ -114,11 +114,44 @@ def create_demo_csv(path="data/demo_iris.csv"):
     return str(out)
 
 
+def prompt_interactive():
+    print("\n" + "=" * 52)
+    print("   FRAMEWORK MODULAR DE MACHINE LEARNING")
+    print("=" * 52)
+
+    data_dir = Path("data")
+    available = sorted(
+        [p for p in data_dir.glob("*") if p.suffix.lower() in {".csv", ".tsv", ".parquet"}]
+    ) if data_dir.exists() else []
+
+    if available:
+        print("\nDatasets detectados en 'data/':")
+        for idx, file_p in enumerate(available, start=1):
+            print(f"  [{idx}] {file_p.name}")
+
+    while True:
+        choice = input("\nElige un número o pega la ruta de tu archivo (.csv/.tsv/.parquet): ").strip().strip('"')
+        if choice.isdigit() and 1 <= int(choice) <= len(available):
+            dataset_path = str(available[int(choice) - 1])
+            break
+        if choice and Path(choice).is_file():
+            dataset_path = choice
+            break
+        print("  [!] Archivo no encontrado. Intenta de nuevo.")
+
+    target_input = input("Columna objetivo (presiona Enter para detección automática): ").strip()
+    target_col = target_input if target_input else None
+    return dataset_path, target_col
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Framework Modular de Machine Learning")
     parser.add_argument("--file", type=str, default=None, help="Ruta al dataset (CSV, TSV o Parquet)")
     parser.add_argument("--target", type=str, default=None, help="Nombre opcional de la columna objetivo")
     args = parser.parse_args()
 
-    dataset_path = args.file if args.file else create_demo_csv()
-    run_pipeline(dataset_path, target_col=args.target)
+    if args.file:
+        run_pipeline(args.file, target_col=args.target)
+    else:
+        dataset_path, target_col = prompt_interactive()
+        run_pipeline(dataset_path, target_col=target_col)
