@@ -16,7 +16,7 @@ from models.supervised.tree_models import CARTModel
 from models.unsupervised.kmeans_engine import KMeansEngine
 
 
-def run_pipeline(file_path: str, target_col: str = None):
+def run_pipeline(file_path: str, target_col: str = None, force_unsupervised=False):
     print(f"\n=== Iniciando Framework ML sobre: {file_path} ===")
 
     # 1. Ingesta Inteligente
@@ -24,7 +24,10 @@ def run_pipeline(file_path: str, target_col: str = None):
     df = loader.load_data()
     if df is None:
         return
-    detected_target, task_type = loader.detect_target(df, target_col=target_col)
+    if force_unsupervised:
+        detected_target, task_type = None, "unsupervised"
+    else:
+        detected_target, task_type = loader.detect_target(df, target_col=target_col)
 
     # 2. Análisis Exploratorio Automatizado (EDA)
     eda = EDAnalyzer(df, reports_dir="reports")
@@ -43,10 +46,13 @@ def run_pipeline(file_path: str, target_col: str = None):
         labels = engine.predict(X_clean)
         visualizer.plot_kmeans_silhouette_detail(X_clean, labels)
         engine.save()
+        df.assign(Cluster=labels).to_csv("reports/kmeans_labels.csv", index=False)
         return
 
     # Ruta Supervisada (Clasificación o Regresión)
     print(f"\n>>> Ruta seleccionada: APRENDIZAJE SUPERVISADO ({task_type.upper()})")
+    # Las filas sin etiqueta no permiten entrenamiento supervisado.
+    df = df.dropna(subset=[detected_target])
     X = df.drop(columns=[detected_target])
     y = df[detected_target]
 
@@ -85,6 +91,8 @@ def run_pipeline(file_path: str, target_col: str = None):
         metrics = evaluator.evaluate(y_test, y_pred, model_name=name)
         results_summary[name.upper()] = metrics
         model.save()
+        if name == "cart":
+            model.plot_feature_importance(prep.feature_names_out)
 
         if metrics[metric_key] > best_score:
             best_score = metrics[metric_key]
@@ -93,6 +101,8 @@ def run_pipeline(file_path: str, target_col: str = None):
     print("\n=== Resumen Comparativo de Modelos ===")
     summary_df = pd.DataFrame(results_summary).T
     print(summary_df.round(4))
+    summary_df.to_csv("reports/supervised_metrics.csv")
+    visualizer.plot_model_comparison(summary_df[metric_key].to_dict(), metric_name=metric_key)
 
     # Diagnósticos avanzados solo para el mejor modelo
     if best_info is not None:
@@ -139,19 +149,22 @@ def prompt_interactive():
             break
         print("  [!] Archivo no encontrado. Intenta de nuevo.")
 
-    target_input = input("Columna objetivo (presiona Enter para detección automática): ").strip()
-    target_col = target_input if target_input else None
-    return dataset_path, target_col
+    target_input = input("Columna objetivo (Enter: automática, -: no supervisado): ").strip()
+    target_col = target_input if target_input and target_input != "-" else None
+    return dataset_path, target_col, target_input == "-"
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Framework Modular de Machine Learning")
     parser.add_argument("--file", type=str, default=None, help="Ruta al dataset (CSV, TSV o Parquet)")
     parser.add_argument("--target", type=str, default=None, help="Nombre opcional de la columna objetivo")
+    parser.add_argument("--unsupervised", action="store_true", help="Forzar aprendizaje no supervisado")
     args = parser.parse_args()
+    if args.unsupervised and args.target:
+        parser.error("--unsupervised y --target no se pueden combinar")
 
     if args.file:
-        run_pipeline(args.file, target_col=args.target)
+        run_pipeline(args.file, target_col=args.target, force_unsupervised=args.unsupervised)
     else:
-        dataset_path, target_col = prompt_interactive()
-        run_pipeline(dataset_path, target_col=target_col)
+        dataset_path, target_col, force_unsupervised = prompt_interactive()
+        run_pipeline(dataset_path, target_col=target_col, force_unsupervised=force_unsupervised or args.unsupervised)
