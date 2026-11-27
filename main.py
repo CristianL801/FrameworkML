@@ -30,6 +30,8 @@ def run_pipeline(file_path: str, target_col: str = None):
     eda = EDAnalyzer(df, reports_dir="reports")
     eda.run_full_eda()
 
+    visualizer = ModelVisualizer(reports_dir="reports")
+
     # 3. Enrutamiento: No Supervisado vs Supervisado
     if detected_target is None or task_type == "unsupervised":
         print("\n>>> Ruta seleccionada: APRENDIZAJE NO SUPERVISADO (K-Means)")
@@ -38,6 +40,8 @@ def run_pipeline(file_path: str, target_col: str = None):
 
         engine = KMeansEngine(reports_dir="reports")
         engine.fit(X_clean)
+        labels = engine.predict(X_clean)
+        visualizer.plot_kmeans_silhouette_detail(X_clean, labels)
         engine.save()
         return
 
@@ -64,7 +68,10 @@ def run_pipeline(file_path: str, target_col: str = None):
         models_to_run["dann"] = DANNModel()
 
     evaluator = ModelEvaluator(task=task_type, reports_dir="reports")
+    metric_key = "f1_score" if task_type == "classification" else "r2"
     results_summary = {}
+    best_score = -float("inf")
+    best_info = None
 
     for name, model in models_to_run.items():
         print(f"\n--- Entrenando modelo: {name.upper()} ---")
@@ -75,21 +82,28 @@ def run_pipeline(file_path: str, target_col: str = None):
         model.fit(X_train_clean, y_train)
         y_pred = model.predict(X_test_clean)
 
-        results_summary[name.upper()] = evaluator.evaluate(y_test, y_pred, model_name=name)
+        metrics = evaluator.evaluate(y_test, y_pred, model_name=name)
+        results_summary[name.upper()] = metrics
         model.save()
 
-        if name == "cart":
-            model.plot_feature_importance(prep.feature_names_out)
+        if metrics[metric_key] > best_score:
+            best_score = metrics[metric_key]
+            best_info = (name, model, X_train_clean, X_test_clean, y_pred)
 
     print("\n=== Resumen Comparativo de Modelos ===")
     summary_df = pd.DataFrame(results_summary).T
     print(summary_df.round(4))
 
-    # Gráfico comparativo consolidado
-    metric_key = "f1_score" if task_type == "classification" else "r2"
-    comparison_scores = {m: vals[metric_key] for m, vals in results_summary.items()}
-    visualizer = ModelVisualizer(reports_dir="reports")
-    visualizer.plot_model_comparison(comparison_scores, metric_name=metric_key)
+    # Diagnósticos avanzados solo para el mejor modelo
+    if best_info is not None:
+        best_name, best_model, best_X_train, best_X_test, best_y_pred = best_info
+        if task_type == "classification":
+            estimator = getattr(best_model, "model", best_model)
+            visualizer.plot_classification_diagnostics(
+                estimator, best_X_train, y_train, best_X_test, y_test, model_name=best_name
+            )
+        else:
+            visualizer.plot_regression_diagnostics(y_test, best_y_pred, model_name=best_name)
 
 
 def create_demo_csv(path="data/demo_iris.csv"):
